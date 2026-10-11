@@ -33,6 +33,8 @@ public class PaymentMapperTests
     [Theory]
     [InlineData(DomainPaymentStatus.Authorized, PaymentStatus.Authorized)]
     [InlineData(DomainPaymentStatus.Declined, PaymentStatus.Declined)]
+    [InlineData(DomainPaymentStatus.Pending, PaymentStatus.Pending)]
+    [InlineData(DomainPaymentStatus.Failed, PaymentStatus.Failed)]
     public void ToResponse_MapsAllFields(DomainPaymentStatus domainStatus, PaymentStatus expectedStatus)
     {
         // Arrange

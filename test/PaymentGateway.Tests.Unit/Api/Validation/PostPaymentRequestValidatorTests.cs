@@ -133,7 +133,7 @@ public class PostPaymentRequestValidatorTests
 
     [Theory]
     [InlineData("JPY")]
-    [InlineData("gbp")]
+    [InlineData("jpy")]
     [InlineData("GB")]
     [InlineData("GBPX")]
     public void Validate_UnsupportedCurrency_HasCurrencyErrorOnly(string currency)
@@ -146,6 +146,21 @@ public class PostPaymentRequestValidatorTests
 
         // Assert
         result.ShouldHaveValidationErrorFor(r => r.Currency).Only();
+    }
+
+    [Theory]
+    [InlineData("gbp")]
+    [InlineData("Usd")]
+    public void Validate_SupportedCurrencyInAnyCase_HasNoErrors(string currency)
+    {
+        // Arrange
+        var request = _validRequest with { Currency = currency };
+
+        // Act
+        var result = _sut.TestValidate(request);
+
+        // Assert
+        result.ShouldNotHaveAnyValidationErrors();
     }
 
     [Theory]

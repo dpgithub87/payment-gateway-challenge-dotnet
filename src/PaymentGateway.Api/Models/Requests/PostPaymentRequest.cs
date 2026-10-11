@@ -6,4 +6,13 @@ public sealed record PostPaymentRequest(
     int? ExpiryYear,
     string? Currency,
     int? Amount,
-    string? Cvv);
+    string? Cvv)
+{
+    private readonly string? _currency = Currency?.ToUpperInvariant();
+
+    public string? Currency
+    {
+        get => _currency;
+        init => _currency = value?.ToUpperInvariant();
+    }
+}

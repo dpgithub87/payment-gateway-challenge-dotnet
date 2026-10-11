@@ -40,10 +40,35 @@ public class CreatePaymentHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_BankAuthorizes_ReturnsAuthorizedPaymentAndStoresIt()
+    public async Task HandleAsync_StoresPendingPaymentBeforeCallingBank()
     {
         // Arrange
-        SetupBankResponse(new BankAuthorizationResult.Success(true, _authorizationCode));
+        Payment? storedBeforeBankCall = null;
+        var storedWhenBankCalled = false;
+        _paymentsRepositoryMock
+            .Setup(r => r.AddAsync(It.IsAny<Payment>(), It.IsAny<CancellationToken>()))
+            .Callback<Payment, CancellationToken>((payment, _) => storedBeforeBankCall = payment);
+        _acquiringBankClientMock
+            .Setup(b => b.AuthorizeAsync(It.IsAny<CreatePaymentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback(() => storedWhenBankCalled = storedBeforeBankCall is not null)
+            .ReturnsAsync(new BankAuthorizationResult.Success(true, _authorizationCode));
+
+        // Act
+        await _sut.HandleAsync(_request);
+
+        // Assert
+        Assert.True(storedWhenBankCalled);
+        Assert.Equal(PaymentStatus.Pending, storedBeforeBankCall!.Status);
+        Assert.Equal(_now, storedBeforeBankCall.CreatedAt);
+    }
+
+    [Theory]
+    [InlineData(true, PaymentStatus.Authorized)]
+    [InlineData(false, PaymentStatus.Declined)]
+    public async Task HandleAsync_BankResponds_ReturnsAndStoresCompletedPayment(bool authorized, PaymentStatus expectedStatus)
+    {
+        // Arrange
+        SetupBankResponse(new BankAuthorizationResult.Success(authorized, _authorizationCode));
 
         // Act
         var result = await _sut.HandleAsync(_request);
@@ -51,30 +76,12 @@ public class CreatePaymentHandlerTests
         // Assert
         Assert.True(result.IsSuccess);
         var success = result.AsSuccess;
-        Assert.Equal(PaymentStatus.Authorized, success.Payment.Status);
-        Assert.Equal(_authorizationCode, success.Payment.AuthorizationCode);
-        Assert.Equal(_now, success.Payment.CreatedAt);
-        _paymentsRepositoryMock.Verify(r => r.AddAsync(success.Payment, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(expectedStatus, success.Payment.Status);
+        _paymentsRepositoryMock.Verify(r => r.UpdateAsync(success.Payment, CancellationToken.None), Times.Once);
     }
 
     [Fact]
-    public async Task HandleAsync_BankDeclines_ReturnsDeclinedPaymentAndStoresIt()
-    {
-        // Arrange
-        SetupBankResponse(new BankAuthorizationResult.Success(false, null));
-
-        // Act
-        var result = await _sut.HandleAsync(_request);
-
-        // Assert
-        Assert.True(result.IsSuccess);
-        var success = result.AsSuccess;
-        Assert.Equal(PaymentStatus.Declined, success.Payment.Status);
-        _paymentsRepositoryMock.Verify(r => r.AddAsync(success.Payment, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task HandleAsync_BankUnavailable_ReturnsBankUnavailableErrorAndStoresNothing()
+    public async Task HandleAsync_BankUnavailable_ReturnsBankUnavailableErrorAndStoresFailedPayment()
     {
         // Arrange
         SetupBankResponse(new BankAuthorizationResult.BankUnavailableError());
@@ -84,7 +91,9 @@ public class CreatePaymentHandlerTests
 
         // Assert
         Assert.True(result.IsBankUnavailableError);
-        _paymentsRepositoryMock.Verify(r => r.AddAsync(It.IsAny<Payment>(), It.IsAny<CancellationToken>()), Times.Never);
+        _paymentsRepositoryMock.Verify(
+            r => r.UpdateAsync(It.Is<Payment>(p => p.Status == PaymentStatus.Failed), CancellationToken.None),
+            Times.Once);
     }
 
     [Fact]
@@ -102,10 +111,9 @@ public class CreatePaymentHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_RepositoryThrows_ReturnsInternalError()
+    public async Task HandleAsync_RepositoryThrows_ReturnsInternalErrorAndDoesNotCallBank()
     {
         // Arrange
-        SetupBankResponse(new BankAuthorizationResult.Success(true, _authorizationCode));
         _paymentsRepositoryMock
             .Setup(r => r.AddAsync(It.IsAny<Payment>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException());
@@ -115,6 +123,9 @@ public class CreatePaymentHandlerTests
 
         // Assert
         Assert.True(result.IsInternalError);
+        _acquiringBankClientMock.Verify(
+            b => b.AuthorizeAsync(It.IsAny<CreatePaymentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

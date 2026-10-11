@@ -22,6 +22,13 @@ public sealed class PaymentsRepository : IPaymentsRepository
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task UpdateAsync(Payment payment, CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.Payments.FirstAsync(p => p.Id == payment.Id, cancellationToken);
+        _dbContext.Entry(entity).CurrentValues.SetValues(payment.ToEntity());
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<Payment?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _dbContext.Payments

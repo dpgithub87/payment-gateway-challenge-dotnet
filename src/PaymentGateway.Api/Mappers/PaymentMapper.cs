@@ -38,6 +38,8 @@ public static class PaymentMapper
         {
             DomainPaymentStatus.Authorized => PaymentStatus.Authorized,
             DomainPaymentStatus.Declined => PaymentStatus.Declined,
+            DomainPaymentStatus.Pending => PaymentStatus.Pending,
+            DomainPaymentStatus.Failed => PaymentStatus.Failed,
             _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
         };
     }

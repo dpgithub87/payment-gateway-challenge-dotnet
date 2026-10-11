@@ -42,7 +42,7 @@ public sealed class PaymentsController : ControllerBase
 
         if (!validationResult.IsValid)
         {
-            validationResult.AddToModelState(ModelState);
+            validationResult.CopyErrorsTo(ModelState);
             return ValidationProblem(ModelState);
         }
 

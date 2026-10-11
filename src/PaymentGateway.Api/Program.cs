@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using FluentValidation;
@@ -5,6 +6,7 @@ using FluentValidation;
 using Microsoft.AspNetCore.HttpLogging;
 
 using PaymentGateway.Api.Constants;
+using PaymentGateway.Api.Errors;
 using PaymentGateway.Api.Middleware;
 using PaymentGateway.Api.Models.Requests;
 using PaymentGateway.Api.Validation;
@@ -17,11 +19,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services
     .AddControllers()
-    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddProblemDetails();
+builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = ProblemDetailsCustomization.UseSnakeCaseTraceId);
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpLogging(options =>
 {

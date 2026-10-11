@@ -34,7 +34,7 @@ public class CreatePaymentTests : IClassFixture<PaymentGatewayApiFactory>
         // Arrange
         var request = PaymentRequests.Valid(cardNumber);
         var correlationId = Guid.NewGuid().ToString();
-        using var message = new HttpRequestMessage(HttpMethod.Post, PaymentsUrl) { Content = JsonContent.Create(request) };
+        using var message = new HttpRequestMessage(HttpMethod.Post, PaymentsUrl) { Content = JsonContent.Create(request, options: TestJson.Options) };
         message.Headers.Add(CorrelationIdHeader, correlationId);
 
         // Act
@@ -62,22 +62,24 @@ public class CreatePaymentTests : IClassFixture<PaymentGatewayApiFactory>
         var request = PaymentRequests.Valid(PaymentRequests.BankUnavailableCardNumber);
 
         // Act
-        var response = await _client.PostAsJsonAsync(PaymentsUrl, request);
+        var response = await _client.PostAsJsonAsync(PaymentsUrl, request, TestJson.Options);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
     }
 
-    [Fact]
-    public async Task CreatePayment_BankUnreachable_ReturnsBadGateway()
+    [Theory]
+    [InlineData("AcquiringBank:BaseUrl", "http://localhost:1/")]
+    [InlineData("AcquiringBank:Timeout", "00:00:00.001")]
+    public async Task CreatePayment_BankUnreachableOrTimesOut_ReturnsBadGateway(string setting, string value)
     {
         // Arrange
         var client = _factory
-            .WithWebHostBuilder(builder => builder.UseSetting("AcquiringBank:BaseUrl", "http://localhost:1/"))
+            .WithWebHostBuilder(builder => builder.UseSetting(setting, value))
             .CreateClient();
 
         // Act
-        var response = await client.PostAsJsonAsync(PaymentsUrl, PaymentRequests.Valid());
+        var response = await client.PostAsJsonAsync(PaymentsUrl, PaymentRequests.Valid(), TestJson.Options);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
@@ -90,20 +92,21 @@ public class CreatePaymentTests : IClassFixture<PaymentGatewayApiFactory>
         var request = PaymentRequests.Valid() with { CardNumber = "123", Cvv = null };
 
         // Act
-        var response = await _client.PostAsJsonAsync(PaymentsUrl, request);
+        var response = await _client.PostAsJsonAsync(PaymentsUrl, request, TestJson.Options);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>(TestJson.Options);
         Assert.NotNull(problem);
-        Assert.Equal(["cardNumber", "cvv"], problem.Errors.Keys.Order());
+        Assert.Equal(["card_number", "cvv"], problem.Errors.Keys.Order());
+        Assert.True(problem.Extensions.ContainsKey("trace_id"));
     }
 
     [Fact]
     public async Task CreatePayment_MalformedJson_ReturnsBadRequest()
     {
         // Arrange
-        var content = new StringContent("{\"cardNumber\": 123", Encoding.UTF8, "application/json");
+        var content = new StringContent("{\"card_number\": 123", Encoding.UTF8, "application/json");
 
         // Act
         var response = await _client.PostAsync(PaymentsUrl, content);

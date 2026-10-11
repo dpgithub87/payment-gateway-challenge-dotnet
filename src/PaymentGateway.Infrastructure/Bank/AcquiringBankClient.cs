@@ -61,5 +61,10 @@ public sealed class AcquiringBankClient : IAcquiringBankClient
             _logger.LogWarning(ex, "Acquiring bank request timed out");
             return new BankAuthorizationResult.BankUnavailableError();
         }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            _logger.LogWarning(ex, "Acquiring bank returned an invalid response");
+            return new BankAuthorizationResult.BankUnavailableError();
+        }
     }
 }

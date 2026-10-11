@@ -29,21 +29,24 @@ public sealed class CreatePaymentHandler : IRequestHandler<CreatePaymentRequest,
     {
         try
         {
+            var payment = Payment.Create(request, _timeProvider.GetUtcNow());
+            await _paymentsRepository.AddAsync(payment, cancellationToken);
+
             var bankResult = await _bankClient.AuthorizeAsync(request, cancellationToken);
 
             if (bankResult.IsBankUnavailableError)
             {
-                _logger.LogWarning("Acquiring bank unavailable, payment not processed");
+                await _paymentsRepository.UpdateAsync(payment.Fail(), CancellationToken.None);
+                _logger.LogWarning("Acquiring bank unavailable, payment {PaymentId} failed", payment.Id);
                 return new CreatePaymentResult.BankUnavailableError();
             }
 
-            var payment = Payment.Create(request, bankResult.AsSuccess, _timeProvider.GetUtcNow());
+            var completedPayment = payment.Complete(bankResult.AsSuccess);
+            await _paymentsRepository.UpdateAsync(completedPayment, CancellationToken.None);
 
-            await _paymentsRepository.AddAsync(payment, cancellationToken);
+            _logger.LogInformation("Payment {PaymentId} processed with status {PaymentStatus}", completedPayment.Id, completedPayment.Status);
 
-            _logger.LogInformation("Payment {PaymentId} processed with status {PaymentStatus}", payment.Id, payment.Status);
-
-            return new CreatePaymentResult.Success(payment);
+            return new CreatePaymentResult.Success(completedPayment);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

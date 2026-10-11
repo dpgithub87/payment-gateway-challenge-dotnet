@@ -2,6 +2,7 @@ using AutoFixture;
 
 using Microsoft.EntityFrameworkCore;
 
+using PaymentGateway.Domain.Enums;
 using PaymentGateway.Infrastructure.Database;
 using PaymentGateway.Infrastructure.Repositories;
 using PaymentGateway.Tests.Unit.TestData;
@@ -36,6 +37,21 @@ public class PaymentsRepositoryTests
 
         // Assert
         Assert.Equal(payment, result);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_ExistingPayment_StoresUpdatedPayment()
+    {
+        // Arrange
+        var payment = _fixture.CreatePayment() with { Status = PaymentStatus.Pending, AuthorizationCode = null };
+        await _sut.AddAsync(payment);
+        var updated = payment with { Status = PaymentStatus.Authorized, AuthorizationCode = _fixture.Create<Guid>().ToString() };
+
+        // Act
+        await _sut.UpdateAsync(updated);
+
+        // Assert
+        Assert.Equal(updated, await _sut.GetAsync(payment.Id));
     }
 
     [Fact]

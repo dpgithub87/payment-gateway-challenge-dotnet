@@ -3,5 +3,7 @@ namespace PaymentGateway.Api.Models;
 public enum PaymentStatus
 {
     Authorized,
-    Declined
+    Declined,
+    Pending,
+    Failed
 }

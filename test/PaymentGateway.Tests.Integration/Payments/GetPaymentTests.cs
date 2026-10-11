@@ -22,7 +22,7 @@ public class GetPaymentTests : IClassFixture<PaymentGatewayApiFactory>
     public async Task GetPayment_ExistingPayment_ReturnsPayment()
     {
         // Arrange
-        var createResponse = await _client.PostAsJsonAsync(PaymentsUrl, PaymentRequests.Valid());
+        var createResponse = await _client.PostAsJsonAsync(PaymentsUrl, PaymentRequests.Valid(), TestJson.Options);
         var created = await createResponse.Content.ReadFromJsonAsync<PaymentResponse>(TestJson.Options);
 
         // Act
@@ -34,21 +34,13 @@ public class GetPaymentTests : IClassFixture<PaymentGatewayApiFactory>
         Assert.Equal(created, payment);
     }
 
-    [Fact]
-    public async Task GetPayment_UnknownId_ReturnsNotFound()
+    [Theory]
+    [InlineData("3f2a9c1e-5b7d-4c8e-9a1f-2d3e4f5a6b7c")]
+    [InlineData("not-a-guid")]
+    public async Task GetPayment_UnknownOrInvalidId_ReturnsNotFound(string id)
     {
         // Act
-        var response = await _client.GetAsync($"{PaymentsUrl}/{Guid.NewGuid()}");
-
-        // Assert
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task GetPayment_NonGuidId_ReturnsNotFound()
-    {
-        // Act
-        var response = await _client.GetAsync($"{PaymentsUrl}/not-a-guid");
+        var response = await _client.GetAsync($"{PaymentsUrl}/{id}");
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);

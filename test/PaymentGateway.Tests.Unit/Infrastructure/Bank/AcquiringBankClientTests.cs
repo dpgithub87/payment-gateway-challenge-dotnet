@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 
 using AutoFixture;
 using Microsoft.Extensions.Logging;
@@ -80,13 +81,40 @@ public class AcquiringBankClientTests
         Assert.True(result.IsBankUnavailableError);
     }
 
-    [Theory]
-    [InlineData(typeof(HttpRequestException))]
-    [InlineData(typeof(TaskCanceledException))]
-    public async Task AuthorizeAsync_RequestFailsOrTimesOut_ReturnsBankUnavailableError(Type exceptionType)
+    [Fact]
+    public async Task AuthorizeAsync_RequestFails_ReturnsBankUnavailableError()
     {
         // Arrange
-        SetupHttpException((Exception)Activator.CreateInstance(exceptionType)!);
+        SetupHttpException(new HttpRequestException());
+
+        // Act
+        var result = await _sut.AuthorizeAsync(_request);
+
+        // Assert
+        Assert.True(result.IsBankUnavailableError);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_RequestTimesOut_ReturnsBankUnavailableError()
+    {
+        // Arrange
+        SetupHttpException(new TaskCanceledException());
+
+        // Act
+        var result = await _sut.AuthorizeAsync(_request);
+
+        // Assert
+        Assert.True(result.IsBankUnavailableError);
+    }
+
+    [Theory]
+    [InlineData("not json", "application/json")]
+    [InlineData("<html>error</html>", "text/html")]
+    [InlineData("null", "application/json")]
+    public async Task AuthorizeAsync_BankReturnsInvalidBody_ReturnsBankUnavailableError(string body, string mediaType)
+    {
+        // Arrange
+        SetupHttpResponse(HttpStatusCode.OK, new StringContent(body, Encoding.UTF8, mediaType));
 
         // Act
         var result = await _sut.AuthorizeAsync(_request);
@@ -112,10 +140,15 @@ public class AcquiringBankClientTests
 
     private void SetupHttpResponse(HttpStatusCode statusCode, object body)
     {
+        SetupHttpResponse(statusCode, JsonContent.Create(body));
+    }
+
+    private void SetupHttpResponse(HttpStatusCode statusCode, HttpContent content)
+    {
         _httpMessageHandlerMock
             .Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(statusCode) { Content = JsonContent.Create(body) });
+            .ReturnsAsync(new HttpResponseMessage(statusCode) { Content = content });
     }
 
     private void SetupHttpException(Exception exception)

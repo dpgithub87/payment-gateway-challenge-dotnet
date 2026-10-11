@@ -9,7 +9,7 @@ namespace PaymentGateway.Tests.Unit.Api.Validation;
 public class ValidationResultExtensionsTests
 {
     [Fact]
-    public void AddToModelState_AddsErrorsUnderCamelCasePropertyNames()
+    public void CopyErrorsTo_AddsErrorsUnderSnakeCasePropertyNames()
     {
         // Arrange
         var result = new ValidationResult(
@@ -21,10 +21,10 @@ public class ValidationResultExtensionsTests
         var modelState = new ModelStateDictionary();
 
         // Act
-        result.AddToModelState(modelState);
+        result.CopyErrorsTo(modelState);
 
         // Assert
-        Assert.Equal(["Card number is required."], modelState["cardNumber"]!.Errors.Select(e => e.ErrorMessage));
-        Assert.Equal(["Expiry year is required.", "Expiry date must be in the future."], modelState["expiryYear"]!.Errors.Select(e => e.ErrorMessage));
+        Assert.Equal(["Card number is required."], modelState["card_number"]!.Errors.Select(e => e.ErrorMessage));
+        Assert.Equal(["Expiry year is required.", "Expiry date must be in the future."], modelState["expiry_year"]!.Errors.Select(e => e.ErrorMessage));
     }
 }

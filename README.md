@@ -4,7 +4,7 @@ An ASP.NET Core (.NET 8) API that lets a merchant process card payments through 
 
 ## Features
 
-- **Process a payment**: validates the request, sends it to the acquiring bank (simulator) and returns `Authorized` or `Declined`
+- **Process a payment**: validates the request, stores it as `Pending`, sends it to the acquiring bank (simulator) and returns `Authorized` or `Declined`
 - **Retrieve a payment**: returns a stored payment by ID
 - **Validation**: invalid requests are rejected with all errors at once; the bank is never called
 - **Card data safety**: only the last 4 card digits are stored or returned; CVV is never stored or logged
@@ -28,7 +28,7 @@ An ASP.NET Core (.NET 8) API that lets a merchant process card payments through 
 | Bank declined | `201 Created` | Payment, `status: Declined` |
 | Invalid request (Rejected) | `400 Bad Request` | `ValidationProblemDetails` with all field errors |
 | Payment not found | `404 Not Found` | `ProblemDetails` |
-| Bank unavailable / timeout | `502 Bad Gateway` | `ProblemDetails` |
+| Bank unavailable (non-2xx, unreachable, timeout, invalid reply) | `502 Bad Gateway` | `ProblemDetails`; payment stored as `Failed` |
 | Unexpected error | `500 Internal Server Error` | `ProblemDetails` |
 
 ### Example
@@ -37,16 +37,16 @@ An ASP.NET Core (.NET 8) API that lets a merchant process card payments through 
 curl -X POST http://localhost:5000/api/v1/payments \
   -H "Content-Type: application/json" \
   -H "X-Correlation-ID: my-request-1" \
-  -d '{"cardNumber":"2222405343248877","expiryMonth":4,"expiryYear":2027,"currency":"GBP","amount":100,"cvv":"123"}'
+  -d '{"card_number":"2222405343248877","expiry_month":4,"expiry_year":2027,"currency":"GBP","amount":100,"cvv":"123"}'
 ```
 
 ```json
 {
   "id": "fad0ca48-3f9b-4035-b86c-b5f5f24bc3c8",
   "status": "Authorized",
-  "cardNumberLastFour": "8877",
-  "expiryMonth": 4,
-  "expiryYear": 2027,
+  "card_number_last_four": "8877",
+  "expiry_month": 4,
+  "expiry_year": 2027,
   "currency": "GBP",
   "amount": 100
 }
@@ -64,10 +64,10 @@ Rejected request:
   "title": "One or more validation errors occurred.",
   "status": 400,
   "errors": {
-    "cardNumber": ["Card number must be 14-19 digits."],
+    "card_number": ["Card number must be 14-19 digits."],
     "cvv": ["CVV must be 3-4 digits."]
   },
-  "traceId": "00-f3a6c09b4345d61e7b8a3d773e0a6019-56467a1cc3ea6671-00"
+  "trace_id": "00-f3a6c09b4345d61e7b8a3d773e0a6019-56467a1cc3ea6671-00"
 }
 ```
 
@@ -120,19 +120,23 @@ flowchart LR
 ### Payment flow
 
 1. Controller validates the request; invalid requests return `400` and the bank is never called
-2. `CreatePaymentHandler` calls the bank through `IAcquiringBankClient`
-3. Bank unavailable: returns `BankUnavailableError` (nothing stored), mapped to `502`
-4. Bank responded: `Payment.Create(...)` builds the payment (last 4 digits only, no CVV), it is saved, `201` returned
+2. `Payment.Create(...)` builds a `Pending` payment (last 4 digits only, no CVV) and saves it before the bank is called
+3. `CreatePaymentHandler` calls the bank through `IAcquiringBankClient`
+4. Bank unavailable: the payment is updated to `Failed`, `BankUnavailableError` mapped to `502`
+5. Bank responded: `payment.Complete(...)` sets `Authorized` or `Declined`, the payment is updated, `201` returned
 
 ### Design decisions
 
 - **Ports and adapters**: Domain owns the interfaces; Infrastructure implements them. The in-memory store or the bank client can be swapped without touching business logic
 - **Use cases in Domain**: no separate Application project, as the scope is small
 - **Result types instead of exceptions**: [OneOf](https://github.com/mcintyre321/OneOf) results (`Success`, `NotFound`, `BankUnavailableError`, `InternalError`) make every outcome explicit and map cleanly to HTTP codes
-- **Factory method**: `Payment.Create(...)` owns the entity rules (status, card masking)
+- **Factory and state methods**: `Payment.Create(...)` (Pending, card masking), `Complete(...)` and `Fail()` own the status rules
 - **`TimeProvider`**: injected for expiry validation and timestamps, so tests control time
 - **Separate models per layer**: API request/response, Domain models, bank JSON models and database entities are mapped only at layer boundaries
-- **Bank client**: typed `HttpClient`, snake_case via `JsonNamingPolicy.SnakeCaseLower`, configurable timeout. Non-success responses, network errors and timeouts all become `BankUnavailableError`
+- **snake_case JSON**: request, response and error fields (`card_number`, `trace_id`) follow the Checkout.com public API convention; one serializer policy plus a ProblemDetails customization keeps it consistent
+- **Bank client**: typed `HttpClient`, snake_case via `JsonNamingPolicy.SnakeCaseLower`, configurable timeout. Non-success responses, network errors, timeouts and invalid replies all become `BankUnavailableError`
+- **Pending before the bank call**: every attempt is recorded, and a crash or failed update mid-flow leaves `Pending` rather than losing a possibly charged payment. Bank failures end as `Failed` (502)
+- **Update after the bank call is not cancellable**: the card may already be charged, so the update uses `CancellationToken.None`
 - **No retries**: retrying a payment without an idempotency key risks charging the customer twice
 - **Cancellation**: `CancellationToken` is passed end to end; client cancellations are never reported as errors
 
@@ -182,8 +186,8 @@ dotnet test
 
 | Project | Tests | Scope |
 |---|---|---|
-| `PaymentGateway.Tests.Unit` | 57 | Validator, mappers, handlers, `Payment`, bank client (mocked `HttpMessageHandler`), repository, correlation ID middleware |
-| `PaymentGateway.Tests.Integration` | 10 | Full API via `WebApplicationFactory` against the real bank simulator: Authorized, Declined, bank 503, bank unreachable, validation, malformed JSON, GET, 404, health |
+| `PaymentGateway.Tests.Unit` | 69 | Validator, mappers, handlers, `Payment`, bank client (mocked `HttpMessageHandler`), repository, correlation ID middleware |
+| `PaymentGateway.Tests.Integration` | 11 | Full API via `WebApplicationFactory` against the real bank simulator: Authorized, Declined, bank 503, bank unreachable, bank timeout, validation, malformed JSON, GET, 404, health |
 
 Tools: xUnit, Moq, AutoFixture, FluentValidation `TestHelper`.
 
@@ -195,24 +199,25 @@ Tools: xUnit, Moq, AutoFixture, FluentValidation `TestHelper`.
 - **Correlation ID**: `X-Correlation-ID` is read from the request (or generated from the trace ID), returned in the response and attached to every log line. Incoming values are validated to prevent log injection
 - **Structured logs**: JSON console logs with scopes and UTC timestamps (outside Development); message templates such as `Payment {PaymentId} processed with status {PaymentStatus}`
 - **Request logging**: method, path, status code and duration only; bodies and headers are never logged
-- **Errors**: RFC 9110 `ProblemDetails` with `traceId`
+- **Errors**: RFC 9110 `ProblemDetails` with `trace_id`
 - **Health check**: `GET /health`
 
 ## Assumptions
 
 - A card expiring in the current month is still valid (cards are valid until the end of the expiry month)
-- Supported currencies are `GBP`, `USD` and `EUR`, upper case only
+- Supported currencies are `GBP`, `USD` and `EUR`; input is case-insensitive and normalised to upper case (e.g. `gbp` is stored and returned as `GBP`)
 - Amount must be greater than zero
 - Rejected payments are not stored, as no payment is created
-- Any bank failure (non-2xx, network error, timeout) is reported as `502 Bad Gateway`
+- Any bank failure (non-2xx, network error, timeout, invalid reply) is reported as `502 Bad Gateway` and the payment is stored as `Failed`. A timeout may still have been authorized by the bank; reconciliation would resolve it
+- A payment is only `Pending` during the bank call, or after a crash or failed update; it stays `Pending` until reconciliation is added
 - In-memory storage is acceptable; data is lost on restart
 
-## Productionise the Application
+## Productionise the ApplicationF
 
-- **Idempotency**: `Idempotency-Key` header on POST; same key and body returns the stored response without calling the bank, different body returns `409`. Keys stored in Redis or the database with an expiry, scoped per merchant
-- **Bank timeout reconciliation**: a timed-out payment has an unknown outcome; store it as pending and reconcile with the bank
+- **Idempotency**: `Idempotency-Key` header on POST, following the IETF draft. Same key and body replays the stored response (Authorized or Declined) without calling the bank; same key with a different body returns `422`; same key while the original is still in progress returns `409`. Keys reserved atomically and stored in Redis or the database for ~24h, scoped per merchant. This makes retries to the bank safe
+- **Reconciliation**: a background job resolves `Pending` payments, and `Failed` ones caused by a timeout, with the bank (status lookup) and moves them to `Authorized` or `Declined`
 - **Persistence**: replace EF Core InMemory with Postgres or SQL Server via `IPaymentsRepository`
-- **Security**: merchant authentication (OAuth2 / API keys), scope `GET` to the owning merchant, rate limiting, HTTPS only, PCI DSS scope reduction via card tokenisation
+- **Security**: merchant authentication (OAuth2 / API keys), scope `GET` to the owning merchant, rate limiting, HTTPS only, Payment Card Industry Data Security Standard (PCI DSS) scope reduction via card tokenisation
 - **Resilience**: circuit breaker on bank calls; retries only with idempotency
 - **Observability**: OpenTelemetry traces and metrics (e.g. payments by status, bank latency) exported to Prometheus/Grafana or Datadog; alerting on bank error rate
 - **Deployment**: CI/CD pipeline (build, test, image scan, deploy), Kubernetes with liveness/readiness probes, chiseled runtime image, secrets in a vault
