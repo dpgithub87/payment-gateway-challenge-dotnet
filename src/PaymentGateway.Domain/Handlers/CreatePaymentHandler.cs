@@ -29,29 +29,43 @@ public sealed class CreatePaymentHandler : IRequestHandler<CreatePaymentRequest,
     {
         try
         {
-            var payment = Payment.Create(request, _timeProvider.GetUtcNow());
-            await _paymentsRepository.AddAsync(payment, cancellationToken);
+            var payment = await CreatePendingPaymentAsync(request, cancellationToken);
 
             var bankResult = await _bankClient.AuthorizeAsync(request, cancellationToken);
 
-            if (bankResult.IsBankUnavailableError)
-            {
-                await _paymentsRepository.UpdateAsync(payment.Fail(), CancellationToken.None);
-                _logger.LogWarning("Acquiring bank unavailable, payment {PaymentId} failed", payment.Id);
-                return new CreatePaymentResult.BankUnavailableError();
-            }
-
-            var completedPayment = payment.Complete(bankResult.AsSuccess);
-            await _paymentsRepository.UpdateAsync(completedPayment, CancellationToken.None);
-
-            _logger.LogInformation("Payment {PaymentId} processed with status {PaymentStatus}", completedPayment.Id, completedPayment.Status);
-
-            return new CreatePaymentResult.Success(completedPayment);
+            return bankResult.IsBankUnavailableError
+                ? await FailPaymentAsync(payment)
+                : await CompletePaymentAsync(payment, bankResult.AsSuccess);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Unexpected error while processing payment");
             return new CreatePaymentResult.InternalError();
         }
+    }
+
+    private async Task<Payment> CreatePendingPaymentAsync(CreatePaymentRequest request, CancellationToken cancellationToken)
+    {
+        var payment = Payment.Create(request, _timeProvider.GetUtcNow());
+        await _paymentsRepository.AddAsync(payment, cancellationToken);
+
+        return payment;
+    }
+
+    private async Task<CreatePaymentResult> FailPaymentAsync(Payment payment)
+    {
+        await _paymentsRepository.UpdateAsync(payment.Fail(), CancellationToken.None);
+        _logger.LogWarning("Acquiring bank unavailable, payment {PaymentId} failed", payment.Id);
+
+        return new CreatePaymentResult.BankUnavailableError();
+    }
+
+    private async Task<CreatePaymentResult> CompletePaymentAsync(Payment payment, BankAuthorizationResult.Success bankResult)
+    {
+        var completedPayment = payment.Complete(bankResult);
+        await _paymentsRepository.UpdateAsync(completedPayment, CancellationToken.None);
+        _logger.LogInformation("Payment {PaymentId} processed with status {PaymentStatus}", completedPayment.Id, completedPayment.Status);
+
+        return new CreatePaymentResult.Success(completedPayment);
     }
 }
