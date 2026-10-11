@@ -212,7 +212,7 @@ Tools: xUnit, Moq, AutoFixture, FluentValidation `TestHelper`.
 - A payment is only `Pending` during the bank call, or after a crash or failed update; it stays `Pending` until reconciliation is added
 - In-memory storage is acceptable; data is lost on restart
 
-## Productionise the ApplicationF
+## Productionise the Application
 
 - **Idempotency**: `Idempotency-Key` header on POST, following the IETF draft. Same key and body replays the stored response (Authorized or Declined) without calling the bank; same key with a different body returns `422`; same key while the original is still in progress returns `409`. Keys reserved atomically and stored in Redis or the database for ~24h, scoped per merchant. This makes retries to the bank safe
 - **Reconciliation**: a background job resolves `Pending` payments, and `Failed` ones caused by a timeout, with the bank (status lookup) and moves them to `Authorized` or `Declined`
