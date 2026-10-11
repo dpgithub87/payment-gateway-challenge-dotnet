@@ -37,7 +37,14 @@ An ASP.NET Core (.NET 8) API that lets a merchant process card payments through 
 curl -X POST http://localhost:5000/api/v1/payments \
   -H "Content-Type: application/json" \
   -H "X-Correlation-ID: my-request-1" \
-  -d '{"card_number":"2222405343248877","expiry_month":4,"expiry_year":2027,"currency":"GBP","amount":100,"cvv":"123"}'
+  -d '{
+    "card_number": "2222405343248877",
+    "expiry_month": 4,
+    "expiry_year": 2027,
+    "currency": "GBP",
+    "amount": 100,
+    "cvv": "123"
+  }'
 ```
 
 ```json
