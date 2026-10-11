@@ -4,5 +4,6 @@ public enum PaymentStatus
 {
     Authorized,
     Declined,
-    Rejected
+    Pending,
+    Failed
 }

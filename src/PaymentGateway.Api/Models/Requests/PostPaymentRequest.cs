@@ -1,11 +1,18 @@
-﻿namespace PaymentGateway.Api.Models.Requests;
+namespace PaymentGateway.Api.Models.Requests;
 
-public class PostPaymentRequest
+public sealed record PostPaymentRequest(
+    string? CardNumber,
+    int? ExpiryMonth,
+    int? ExpiryYear,
+    string? Currency,
+    int? Amount,
+    string? Cvv)
 {
-    public int CardNumberLastFour { get; set; }
-    public int ExpiryMonth { get; set; }
-    public int ExpiryYear { get; set; }
-    public string Currency { get; set; }
-    public int Amount { get; set; }
-    public int Cvv { get; set; }
+    private readonly string? _currency = Currency?.ToUpperInvariant();
+
+    public string? Currency
+    {
+        get => _currency;
+        init => _currency = value?.ToUpperInvariant();
+    }
 }

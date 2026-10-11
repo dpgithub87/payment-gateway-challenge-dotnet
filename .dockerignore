@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/*.user
+.git/
+.github/
+.idea/
+.vs/
+log/
+test/
+imposters/
