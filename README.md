@@ -236,3 +236,10 @@ Tools: xUnit, Moq, AutoFixture, FluentValidation `TestHelper`.
 - Card number Luhn check
 - Contract tests against the bank API
 - Load tests to establish latency and throughput baselines
+
+## Take-home Interview questions
+- Usage of connectors with Strategy pattern
+- Why not Rejected payment status for invalid requests?
+- What if we get 200 ok back from the bank, but the body structure isn't parsable?
+  - Return with pending payment status and do reconciliation on the payment status
+  - Send webhook notification to clients on status changes
